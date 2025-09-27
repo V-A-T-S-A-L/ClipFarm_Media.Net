@@ -50,8 +50,8 @@ export default function VideoGenerator() {
     const [currentPreviewScene, setCurrentPreviewScene] = useState(0);
     const [editingSceneIndex, setEditingSceneIndex] = useState<number | null>(null);
     const [darkMode, setDarkMode] = useState(false);
-    const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
-    
+    const [subtitlesEnabled, setSubtitlesEnabled] = useState(false);
+
     // New state for enhanced features
     const [useTemplate, setUseTemplate] = useState(false);
     const [selectedTemplate, setSelectedTemplate] = useState("subway-surfers");
@@ -59,7 +59,7 @@ export default function VideoGenerator() {
     const [showSpeakerSelectionModal, setShowSpeakerSelectionModal] = useState(false);
     const [selectedSpeakers, setSelectedSpeakers] = useState<string[]>([]);
     const [conversationalVoices, setConversationalVoices] = useState({ voice1: "male", voice2: "female" });
-    const [randomSlang, setRandomSlang] = useState<{ term: string; definition: string } | null>(null);
+ const [randomSlang, setRandomSlang] = useState<{ term: string; definition: string } | null>(null);
 
     useEffect(() => {
         const slangs = [
@@ -141,11 +141,11 @@ export default function VideoGenerator() {
             const scriptResponse = await fetch("/api/generate-script", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ 
-                    prompt, 
-                    style: "brainrot", 
+                body: JSON.stringify({
+                    prompt,
+                    style: "brainrot",
                     isConversational,
-                    useTemplate 
+                    useTemplate
                 }),
             });
 
@@ -192,10 +192,10 @@ export default function VideoGenerator() {
                 }));
                 setScenesWithImages(updatedScenes);
             }
-            
+
             setIsEditing(true);
-            setGenerationStep(useTemplate ? 
-                "✅ Script and template ready for editing!" : 
+            setGenerationStep(useTemplate ?
+                "✅ Script and template ready for editing!" :
                 "✅ Script and images ready for editing!"
             );
         } catch (error) {
@@ -270,9 +270,9 @@ export default function VideoGenerator() {
                 const audioResponse = await fetch("/api/generate-audio", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ 
+                    body: JSON.stringify({
                         text: scene.voiceover,
-                        voice: voiceType 
+                        voice: voiceType
                     }),
                 });
 
@@ -427,6 +427,7 @@ export default function VideoGenerator() {
     }
 
     const createSynchronizedVideo = async (script: ScriptData, images: any[], audioFiles: Blob[], audioDurations: number[]) => {
+
         if (!ffmpeg || !ffmpeg.loaded) {
             throw new Error("FFmpeg is not loaded. Please ensure it has loaded before calling this function.");
         }
@@ -541,23 +542,29 @@ export default function VideoGenerator() {
                     }
                 }
 
-                // --- DRAWING AREA DEFINITIONS ---
-                const subtitleY = canvas.height - 100;
+                // --- DRAWING AREA DEFINITIONS (UPDATED FOR SMALLER, CENTERED SUBTITLES) ---
+                // Removed subtitleY constant as it's no longer a fixed bottom position
                 const captionY = canvas.height - (isConversational ? 180 : 250);
-                const lineSpacing = 80;
-                const textFont = "bold 64px Arial";
+                const lineSpacing = 60; // Reduced line spacing (was 80)
+                const textFont = "bold 48px Arial"; // Reduced font size (was 64px)
                 const textFill = "white";
                 const textStroke = "black";
-                const strokeWidth = 10;
+                const strokeWidth = 8; // Reduced stroke width (was 10)
+                
                 ctx.font = textFont;
                 ctx.textAlign = "center";
                 ctx.textBaseline = "alphabetic";
+
+                // Calculate the vertical center of the canvas
+                const canvasCenterY = canvas.height / 2;
+
 
                 // 3. DRAW STATIC CAPTION
                 if (scene.caption) {
                     const captionLines = getWrappedLines(ctx, scene.caption, canvas.width - 40, textFont);
 
                     ctx.fillStyle = "rgba(0,0,0,0.6)";
+                    // Note: This bounding box calculation might need adjustment if you center the caption too.
                     ctx.fillRect(0, captionY - lineSpacing, canvas.width, captionLines.length * lineSpacing + 40);
 
                     captionLines.forEach((line, index) => {
@@ -573,21 +580,36 @@ export default function VideoGenerator() {
                     });
                 }
 
-                // 4. DRAW ANIMATED DIALOGUE SUBTITLE
+
+                // 4. DRAW ANIMATED DIALOGUE SUBTITLE (UPDATED)
                 if (subtitlesEnabled && voiceoverText && totalWords > 0) {
                     const currentTimeInScene = f / fps;
                     const wordsToShow = Math.min(totalWords, Math.ceil(currentTimeInScene / wordDuration));
                     const currentSubtitleText = allWords.slice(0, wordsToShow).join(' ');
 
                     const subtitleLines = getWrappedLines(ctx, currentSubtitleText, canvas.width - 40, textFont);
+                    
+                    // Calculate the total height of the subtitle block
+                    const subtitleBlockHeight = subtitleLines.length * lineSpacing;
+                    
+                    // Calculate the starting Y position to center the entire block vertically
+                    // StartY = CenterY - (BlockHeight / 2) + (LineSpacing / 2)
+                    const startY = canvasCenterY - (subtitleBlockHeight / 2) + (lineSpacing / 2);
+
+
+                    // Optionally draw a background box for the centered subtitle
+                    // ctx.fillStyle = "rgba(0,0,0,0.6)";
+                    // ctx.fillRect(0, startY - lineSpacing, canvas.width, subtitleLines.length * lineSpacing + 40);
+
 
                     subtitleLines.forEach((line, index) => {
-                        const textY = subtitleY + (index * lineSpacing) - (subtitleLines.length * lineSpacing);
+                        // textY calculation centers the block around canvasCenterY
+                        const textY = startY + (index * lineSpacing); 
 
                         ctx.strokeStyle = textStroke;
                         ctx.lineWidth = strokeWidth;
                         ctx.lineJoin = 'round';
-                        ctx.strokeText(line, canvas.width / 2, textY);
+                        ctx.strokeText(line, canvas.width / 2, textY); // X remains centered (canvas.width / 2)
 
                         ctx.fillStyle = textFill;
                         ctx.fillText(line, canvas.width / 2, textY);
@@ -605,6 +627,7 @@ export default function VideoGenerator() {
         }
 
         // FFmpeg Audio Concatenation Logic
+
         let audioFilterComplex = "";
         let audioInputs = "";
 
@@ -725,7 +748,7 @@ export default function VideoGenerator() {
                                 className="h-12 text-base dark:bg-zinc-800"
                                 disabled={isEditing}
                             />
-                            
+
                             {/* Template Selection */}
                             <div className="space-y-3">
                                 <div className="flex items-center space-x-2">
@@ -741,7 +764,7 @@ export default function VideoGenerator() {
                                         Use background video template
                                     </label>
                                 </div>
-                                
+
                                 {useTemplate && (
                                     <Select value={selectedTemplate} onValueChange={setSelectedTemplate} disabled={isEditing}>
                                         <SelectTrigger className="h-12 text-base text-purple-500 dark:bg-zinc-800">
@@ -756,7 +779,7 @@ export default function VideoGenerator() {
                                     </Select>
                                 )}
                             </div>
-                            
+
                             {/* Conversational Reel Option */}
                             <div className="space-y-3">
                                 <div className="flex items-center space-x-2">
@@ -780,7 +803,7 @@ export default function VideoGenerator() {
                                         Make it conversational (dialogue between two people)
                                     </label>
                                 </div>
-                                
+
                                 {isConversational && (
                                     <div className="space-y-2">
                                         <div className="text-xs text-zinc-500 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-800 p-3 rounded-lg">
@@ -870,7 +893,7 @@ export default function VideoGenerator() {
                 {/* Dynamic Slang Section */}
                 {!isGenerating && !isEditing && !videoUrl && randomSlang && (
                     <div className="fixed inset-x-0 bottom-0 z-50 flex justify-center pointer-events-none">
-                        <div className="w-full max-w-md mx-auto mb-6 px-4 pointer-events-auto"> 
+                        <div className="w-full max-w-md mx-auto mb-6 px-4 pointer-events-auto">
                             <div className="bg-white/90 dark:bg-zinc-900/90 backdrop-blur-lg border border-white/30 dark:border-zinc-800/70 rounded-2xl shadow-xl p-5">
                                 <div className="text-center">
                                     <p className="font-bold text-2xl text-pink-500">{randomSlang.term}</p>
