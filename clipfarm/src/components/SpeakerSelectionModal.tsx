@@ -14,8 +14,8 @@ export interface Speaker {
 }
 
 export const availableSpeakers: Speaker[] = [
-  { id: "speaker1", name: "Cyber Nigga", image: "/assets/images/brand-logos/youtube.svg", voice: "pqHfZKP75CvOlQylNhV4", sticker: "robot" },
-  { id: "speaker2", name: "Street Brawler", image: "/assets/images/brand-logos/tiktok.svg", voice: "ThT5KcBeYPX3keUQqHPh", sticker: "person2" },
+  { id: "speaker1", name: "Cyber Nigga", image: "/assets/images/brand-logos/youtube.svg", voice: "voice1", sticker: "robot" },
+  { id: "speaker2", name: "Street Brawler", image: "/assets/images/brand-logos/tiktok.svg", voice: "voice2", sticker: "person2" },
   { id: "speaker3", name: "Rogue Ass", image: "/assets/images/brand-logos/instagram.svg", voice: "echo", sticker: "wizard" },
   { id: "speaker4", name: "Heavy Hitler", image: "/assets/images/brand-logos/reddit.svg", voice: "shimmer", sticker: "alien" },
 ];
