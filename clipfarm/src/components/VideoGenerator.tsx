@@ -10,6 +10,7 @@ import { Loader2, Download, Film, Sparkles, Clock, MessageSquare, Eye, Search, E
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile, toBlobURL } from "@ffmpeg/util";
 import TrueFocus from "./TrueFocus";
+import SpeakerSelectionModal, { availableSpeakers } from "./SpeakerSelectionModal";
 import Link from "next/link";
 
 interface Scene {
@@ -31,8 +32,7 @@ interface SceneWithImage extends Scene {
     imageLoading?: boolean;
     audioStartTime?: number;
     audioEndTime?: number;
-    speaker?: "voice1" | "voice2"; // For conversational reels
-    currentSticker?: string; // Current sticker for this scene
+    speakerId?: string; // Speaker ID from availableSpeakers for conversational reels
     templateVideo?: string; // Template video URL if using template
 }
 
@@ -56,10 +56,10 @@ export default function VideoGenerator() {
     const [useTemplate, setUseTemplate] = useState(false);
     const [selectedTemplate, setSelectedTemplate] = useState("subway-surfers");
     const [isConversational, setIsConversational] = useState(false);
-    const [showStickerModal, setShowStickerModal] = useState(false);
-    const [selectedStickers, setSelectedStickers] = useState({ sticker1: "person1", sticker2: "person2" });
-    const [conversationalVoices, setConversationalVoices] = useState({ voice1: "male", voice2: "female" });    const [randomSlang, setRandomSlang] = useState<{ term: string; definition: string } | null>(null);
-
+    const [showSpeakerSelectionModal, setShowSpeakerSelectionModal] = useState(false);
+    const [selectedSpeakers, setSelectedSpeakers] = useState<string[]>([]);
+    const [conversationalVoices, setConversationalVoices] = useState({ voice1: "male", voice2: "female" });
+    const [randomSlang, setRandomSlang] = useState<{ term: string; definition: string } | null>(null);
 
     useEffect(() => {
         const slangs = [
@@ -100,12 +100,32 @@ export default function VideoGenerator() {
         loadFFmpeg();
     }, []);
 
+    // Helper function to get speaker by ID
+    const getSpeakerById = (speakerId: string) => {
+        return availableSpeakers.find(s => s.id === speakerId);
+    };
+
+    const handleSpeakerSelection = (speakers: string[]) => {
+        console.log('Selected speakers:', speakers);
+        setSelectedSpeakers(speakers);
+        setShowSpeakerSelectionModal(false);
+        
+        // If we have scenes already, update them with the new speaker assignments
+        if (scenesWithImages.length > 0) {
+            const updatedScenes = scenesWithImages.map((scene, index) => ({
+                ...scene,
+                speakerId: speakers[index % 2] // Alternate between the two selected speakers
+            }));
+            setScenesWithImages(updatedScenes);
+        }
+    };
+
     const generateScript = async () => {
         if (!prompt.trim()) return;
 
-        // If conversational is selected, show sticker modal first
-        if (isConversational && !showStickerModal) {
-            setShowStickerModal(true);
+        // If conversational is selected, show speaker selection modal first
+        if (isConversational && selectedSpeakers.length < 2) {
+            setShowSpeakerSelectionModal(true);
             return;
         }
 
@@ -140,8 +160,9 @@ export default function VideoGenerator() {
                     ...scene,
                     imageLoading: !useTemplate,
                     templateVideo: useTemplate ? getTemplateVideo(selectedTemplate) : undefined,
-                    speaker: isConversational ? (index % 2 === 0 ? "voice1" : "voice2") as "voice1" | "voice2" : undefined,
-                    currentSticker: isConversational ? (index % 2 === 0 ? selectedStickers.sticker1 : selectedStickers.sticker2) : undefined,
+                    speakerId: isConversational && selectedSpeakers.length >= 2 ? 
+                        selectedSpeakers[index % 2] : // Alternate between the two selected speakers
+                        undefined,
                     audioStartTime: currentTime,
                     audioEndTime: currentTime + scene.duration
                 };
@@ -195,20 +216,6 @@ export default function VideoGenerator() {
         return templates[template as keyof typeof templates] || templates["subway-surfers"];
     };
 
-    const getStickerEmoji = (
-        sticker: "person1" | "person2" | "robot" | "cat" | "alien" | "wizard"
-    ): string => {
-        const stickers = {
-            "person1": "👨",
-            "person2": "👩", 
-            "robot": "🤖",
-            "cat": "🐱",
-            "alien": "👽",
-            "wizard": "🧙"
-        };
-        return stickers[sticker] || "👨";
-    };
-
     // Add a function to get the duration from an audio Blob
     const getAudioDuration = async (audioBlob: Blob): Promise<number> => {
         return new Promise((resolve) => {
@@ -253,10 +260,11 @@ export default function VideoGenerator() {
                 const scene = newScenesWithImages[i];
                 setGenerationStep(`Generating voiceover for scene ${i + 1}/${newScenesWithImages.length}...`);
 
-                // Determine voice type for conversational mode
+                // Determine voice for conversational mode
                 let voiceType = "default";
-                if (isConversational && scene.speaker) {
-                    voiceType = scene.speaker === "voice1" ? conversationalVoices.voice1 : conversationalVoices.voice2;
+                if (isConversational && scene.speakerId) {
+                    const speaker = getSpeakerById(scene.speakerId);
+                    voiceType = speaker?.voice || "alloy";
                 }
 
                 const audioResponse = await fetch("/api/generate-audio", {
@@ -398,6 +406,26 @@ export default function VideoGenerator() {
         return lines;
     };
 
+    // Helper function to get sticker emoji by type
+    function getStickerEmoji(type: "person1" | "person2" | "robot" | "cat" | "alien" | "wizard"): string {
+        switch (type) {
+            case "person1":
+                return "👨";
+            case "person2":
+                return "👩";
+            case "robot":
+                return "🤖";
+            case "cat":
+                return "🐱";
+            case "alien":
+                return "👽";
+            case "wizard":
+                return "🧙";
+            default:
+                return "👤";
+        }
+    }
+
     const createSynchronizedVideo = async (script: ScriptData, images: any[], audioFiles: Blob[], audioDurations: number[]) => {
         if (!ffmpeg || !ffmpeg.loaded) {
             throw new Error("FFmpeg is not loaded. Please ensure it has loaded before calling this function.");
@@ -491,23 +519,26 @@ export default function VideoGenerator() {
                 }
 
                 // 2. Draw conversational stickers if enabled
-                if (isConversational && sceneWithImage?.currentSticker) {
-                    const stickerEmoji = getStickerEmoji(sceneWithImage.currentSticker as "person1" | "person2" | "robot" | "cat" | "alien" | "wizard");
-                    const stickerSize = 120;
-                    const stickerX = canvas.width / 2;
-                    const stickerY = canvas.height - 300;
+                if (isConversational && sceneWithImage?.speakerId) {
+                    const speaker = getSpeakerById(sceneWithImage.speakerId);
+                    if (speaker) {
+                        const stickerEmoji = getStickerEmoji(speaker.sticker as "person1" | "person2" | "robot" | "cat" | "alien" | "wizard");
+                        const stickerSize = 120;
+                        const stickerX = canvas.width / 2;
+                        const stickerY = canvas.height - 300;
 
-                    // Draw sticker background
-                    ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
-                    ctx.beginPath();
-                    ctx.arc(stickerX, stickerY, stickerSize / 2, 0, 2 * Math.PI);
-                    ctx.fill();
+                        // Draw sticker background
+                        ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+                        ctx.beginPath();
+                        ctx.arc(stickerX, stickerY, stickerSize / 2, 0, 2 * Math.PI);
+                        ctx.fill();
 
-                    // Draw sticker emoji
-                    ctx.font = `${stickerSize - 20}px Arial`;
-                    ctx.textAlign = "center";
-                    ctx.textBaseline = "middle";
-                    ctx.fillText(stickerEmoji, stickerX, stickerY);
+                        // Draw sticker emoji
+                        ctx.font = `${stickerSize - 20}px Arial`;
+                        ctx.textAlign = "center";
+                        ctx.textBaseline = "middle";
+                        ctx.fillText(stickerEmoji, stickerX, stickerY);
+                    }
                 }
 
                 // --- DRAWING AREA DEFINITIONS ---
@@ -733,7 +764,15 @@ export default function VideoGenerator() {
                                         type="checkbox"
                                         id="isConversational"
                                         checked={isConversational}
-                                        onChange={(e) => setIsConversational(e.target.checked)}
+                                        onChange={(e) => {
+                                            const checked = e.target.checked;
+                                            setIsConversational(checked);
+                                            if (checked && selectedSpeakers.length < 2) {
+                                                setShowSpeakerSelectionModal(true);
+                                            } else if (!checked) {
+                                                setSelectedSpeakers([]);
+                                            }
+                                        }}
                                         disabled={isEditing}
                                         className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
                                     />
@@ -743,8 +782,37 @@ export default function VideoGenerator() {
                                 </div>
                                 
                                 {isConversational && (
-                                    <div className="text-xs text-zinc-500 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-800 p-3 rounded-lg">
-                                        This will create a dialogue between two people with animated stickers and different voices for each speaker.
+                                    <div className="space-y-2">
+                                        <div className="text-xs text-zinc-500 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-800 p-3 rounded-lg">
+                                            This will create a dialogue between two people with animated stickers and different voices for each speaker.
+                                        </div>
+                                        
+                                        {/* Show selected speakers */}
+                                        {selectedSpeakers.length >= 2 && (
+                                            <div className="flex items-center justify-between bg-purple-50 dark:bg-purple-900/20 p-3 rounded-lg">
+                                                <div className="flex items-center space-x-3">
+                                                    <span className="text-xs font-medium text-purple-700 dark:text-purple-300">Selected Speakers:</span>
+                                                    <div className="flex items-center space-x-2">
+                                                        <span className="text-xs bg-purple-100 dark:bg-purple-800 px-2 py-1 rounded-full text-purple-700 dark:text-purple-300">
+                                                            {getSpeakerById(selectedSpeakers[0])?.name || 'Unknown'}
+                                                        </span>
+                                                        <span className="text-xs text-purple-500">vs</span>
+                                                        <span className="text-xs bg-purple-100 dark:bg-purple-800 px-2 py-1 rounded-full text-purple-700 dark:text-purple-300">
+                                                            {getSpeakerById(selectedSpeakers[1])?.name || 'Unknown'}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => setShowSpeakerSelectionModal(true)}
+                                                    disabled={isEditing}
+                                                    className="text-xs h-7"
+                                                >
+                                                    Change
+                                                </Button>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -792,113 +860,12 @@ export default function VideoGenerator() {
                     </CardContent>
                 </Card>
 
-                {/* Sticker Selection Modal */}
-                {showStickerModal && (
-                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                        <Card className="w-full max-w-md mx-4">
-                            <CardHeader>
-                                <CardTitle className="text-xl">Choose Conversation Characters</CardTitle>
-                                <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                                    Select two characters that will appear as stickers during the conversation
-                                </p>
-                            </CardHeader>
-                            <CardContent className="space-y-4">
-                                <div>
-                                    <label className="text-sm font-medium mb-2 block">First Speaker</label>
-                                    <Select value={selectedStickers.sticker1} onValueChange={(value) => 
-                                        setSelectedStickers(prev => ({ ...prev, sticker1: value }))
-                                    }>
-                                        <SelectTrigger>
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="person1">👨 Person 1</SelectItem>
-                                            <SelectItem value="person2">👩 Person 2</SelectItem>
-                                            <SelectItem value="robot">🤖 Robot</SelectItem>
-                                            <SelectItem value="cat">🐱 Cat</SelectItem>
-                                            <SelectItem value="alien">👽 Alien</SelectItem>
-                                            <SelectItem value="wizard">🧙 Wizard</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                
-                                <div>
-                                    <label className="text-sm font-medium mb-2 block">Second Speaker</label>
-                                    <Select value={selectedStickers.sticker2} onValueChange={(value) => 
-                                        setSelectedStickers(prev => ({ ...prev, sticker2: value }))
-                                    }>
-                                        <SelectTrigger>
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="person1">👨 Person 1</SelectItem>
-                                            <SelectItem value="person2">👩 Person 2</SelectItem>
-                                            <SelectItem value="robot">🤖 Robot</SelectItem>
-                                            <SelectItem value="cat">🐱 Cat</SelectItem>
-                                            <SelectItem value="alien">👽 Alien</SelectItem>
-                                            <SelectItem value="wizard">🧙 Wizard</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                
-                                <div className="space-y-3">
-                                    <div>
-                                        <label className="text-sm font-medium mb-2 block">First Speaker Voice</label>
-                                        <Select value={conversationalVoices.voice1} onValueChange={(value) => 
-                                            setConversationalVoices(prev => ({ ...prev, voice1: value }))
-                                        }>
-                                            <SelectTrigger>
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="male">Male Voice</SelectItem>
-                                                <SelectItem value="female">Female Voice</SelectItem>
-                                                <SelectItem value="young-male">Young Male</SelectItem>
-                                                <SelectItem value="young-female">Young Female</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                    
-                                    <div>
-                                        <label className="text-sm font-medium mb-2 block">Second Speaker Voice</label>
-                                        <Select value={conversationalVoices.voice2} onValueChange={(value) => 
-                                            setConversationalVoices(prev => ({ ...prev, voice2: value }))
-                                        }>
-                                            <SelectTrigger>
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="male">Male Voice</SelectItem>
-                                                <SelectItem value="female">Female Voice</SelectItem>
-                                                <SelectItem value="young-male">Young Male</SelectItem>
-                                                <SelectItem value="young-female">Young Female</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                </div>
-                                
-                                <div className="flex space-x-2 pt-4">
-                                    <Button 
-                                        variant="outline" 
-                                        onClick={() => setShowStickerModal(false)}
-                                        className="flex-1"
-                                    >
-                                        Cancel
-                                    </Button>
-                                    <Button 
-                                        onClick={() => {
-                                            setShowStickerModal(false);
-                                            generateScript();
-                                        }}
-                                        className="flex-1 bg-purple-500 hover:bg-purple-600"
-                                    >
-                                        Continue
-                                    </Button>
-                                </div>
-                            </CardContent>
-                        </Card>
-                    </div>
-                )}
+                {/* Speaker Selection Modal */}
+                <SpeakerSelectionModal
+                    isOpen={showSpeakerSelectionModal}
+                    onClose={() => setShowSpeakerSelectionModal(false)}
+                    onConfirm={handleSpeakerSelection}
+                />
 
                 {/* Dynamic Slang Section */}
                 {!isGenerating && !isEditing && !videoUrl && randomSlang && (
@@ -966,49 +933,33 @@ export default function VideoGenerator() {
                                             <CardContent className="space-y-3">
                                                 {/* Speaker Selection for Conversational Mode */}
                                                 {isConversational && (
-                                                    <div className="grid grid-cols-2 gap-2 mb-3">
-                                                        <div>
-                                                            <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                                                                Speaker:
-                                                            </label>
-                                                            <Select 
-                                                                value={scene.speaker || "voice1"} 
-                                                                onValueChange={(value: "voice1" | "voice2") => 
-                                                                    updateScene(index, 'speaker', value)
-                                                                }
-                                                            >
-                                                                <SelectTrigger className="h-8 text-xs">
-                                                                    <SelectValue />
-                                                                </SelectTrigger>
-                                                                <SelectContent>
-                                                                    <SelectItem value="voice1">Speaker 1</SelectItem>
-                                                                    <SelectItem value="voice2">Speaker 2</SelectItem>
-                                                                </SelectContent>
-                                                            </Select>
-                                                        </div>
-                                                        <div>
-                                                            <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                                                                Sticker:
-                                                            </label>
-                                                            <Select 
-                                                                value={scene.currentSticker || selectedStickers.sticker1} 
-                                                                onValueChange={(value) => 
-                                                                    updateScene(index, 'currentSticker', value)
-                                                                }
-                                                            >
-                                                                <SelectTrigger className="h-8 text-xs">
-                                                                    <SelectValue />
-                                                                </SelectTrigger>
-                                                                <SelectContent>
-                                                                    <SelectItem value="person1">👨 Person 1</SelectItem>
-                                                                    <SelectItem value="person2">👩 Person 2</SelectItem>
-                                                                    <SelectItem value="robot">🤖 Robot</SelectItem>
-                                                                    <SelectItem value="cat">🐱 Cat</SelectItem>
-                                                                    <SelectItem value="alien">👽 Alien</SelectItem>
-                                                                    <SelectItem value="wizard">🧙 Wizard</SelectItem>
-                                                                </SelectContent>
-                                                            </Select>
-                                                        </div>
+                                                    <div className="mb-3">
+                                                        <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-2 block">
+                                                            Speaker:
+                                                        </label>
+                                                        <Select 
+                                                            value={scene.speakerId || (selectedSpeakers.length > 0 ? selectedSpeakers[0] : '')} 
+                                                            onValueChange={(value: string) => 
+                                                                updateScene(index, 'speakerId', value)
+                                                            }
+                                                        >
+                                                            <SelectTrigger className="h-8 text-xs">
+                                                                <SelectValue />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                {selectedSpeakers.map((speakerId) => {
+                                                                    const speaker = getSpeakerById(speakerId);
+                                                                    return (
+                                                                        <SelectItem key={speakerId} value={speakerId}>
+                                                                            <div className="flex items-center space-x-2">
+                                                                                <span>{getStickerEmoji(speaker?.sticker as any)}</span>
+                                                                                <span>{speaker?.name}</span>
+                                                                            </div>
+                                                                        </SelectItem>
+                                                                    );
+                                                                })}
+                                                            </SelectContent>
+                                                        </Select>
                                                     </div>
                                                 )}
 
@@ -1183,10 +1134,13 @@ export default function VideoGenerator() {
                                                     )}
 
                                                     {/* Conversational Stickers */}
-                                                    {isConversational && scenesWithImages[currentPreviewScene] && (
+                                                    {isConversational && scenesWithImages[currentPreviewScene]?.speakerId && (
                                                         <div className="absolute bottom-32 left-4 right-4 flex justify-center">
                                                             <div className="bg-white bg-opacity-90 rounded-full p-3 text-2xl shadow-lg">
-                                                                {getStickerEmoji((scenesWithImages[currentPreviewScene].currentSticker || 'person1') as "person1" | "person2" | "robot" | "cat" | "alien" | "wizard")}
+                                                                {(() => {
+                                                                    const speaker = getSpeakerById(scenesWithImages[currentPreviewScene].speakerId!);
+                                                                    return getStickerEmoji(speaker?.sticker as any);
+                                                                })()}
                                                             </div>
                                                         </div>
                                                     )}
