@@ -187,7 +187,7 @@ const HeroSection: React.FC = () => {
 
                                 <div className="flex mt-2 gap-2 flex-col">
                                     {[
-                                        { icon: <ImageIcon className="w-5 h-5" />, text: 'Video generator', href: '/reel-generator' },
+                                        { icon: <ImageIcon className="w-5 h-5" />, text: 'Video generator', href: '/create' },
                                         { icon: <FileText className="w-5 h-5" />, text: 'Script generator', href: '#' },
                                         { icon: <Code2 className="w-5 h-5" />, text: 'Documentation', href: '#' },
                                     ].map((item, index) => (

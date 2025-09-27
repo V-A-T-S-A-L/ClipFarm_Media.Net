@@ -58,7 +58,21 @@ export default function VideoGenerator() {
     const [isConversational, setIsConversational] = useState(false);
     const [showStickerModal, setShowStickerModal] = useState(false);
     const [selectedStickers, setSelectedStickers] = useState({ sticker1: "person1", sticker2: "person2" });
-    const [conversationalVoices, setConversationalVoices] = useState({ voice1: "male", voice2: "female" });
+    const [conversationalVoices, setConversationalVoices] = useState({ voice1: "male", voice2: "female" });    const [randomSlang, setRandomSlang] = useState<{ term: string; definition: string } | null>(null);
+
+
+    useEffect(() => {
+        const slangs = [
+            { term: 'Rizz', definition: 'Short for charisma. Effortless charm and flirtatiousness.' },
+            { term: 'Bet', definition: '"Yes", "okay", or a response to a challenge. It\'s a confirmation.' },
+            { term: 'Cap / No Cap', definition: 'A lie or exaggeration. "No cap" means "for real".' },
+            { term: 'Skibidi', definition: 'Refers to the chaotic "Skibidi Toilet" YouTube series. Often nonsensical.' },
+            { term: 'Fanum Tax', definition: 'The "tax" a friend takes from your food, popularized by streamer Fanum.' },
+            { term: 'Gyatt', definition: 'An exclamation for someone with a large posterior. Short for "goddamn".' }
+        ];
+        const randomIndex = Math.floor(Math.random() * slangs.length);
+        setRandomSlang(slangs[randomIndex]);
+    }, []);
 
     useEffect(() => {
         // Check for saved theme preference or default to light mode
@@ -699,7 +713,7 @@ export default function VideoGenerator() {
                                 
                                 {useTemplate && (
                                     <Select value={selectedTemplate} onValueChange={setSelectedTemplate} disabled={isEditing}>
-                                        <SelectTrigger className="h-12 text-base dark:bg-zinc-800">
+                                        <SelectTrigger className="h-12 text-base text-purple-500 dark:bg-zinc-800">
                                             <SelectValue placeholder="Select a template" />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -883,6 +897,20 @@ export default function VideoGenerator() {
                                 </div>
                             </CardContent>
                         </Card>
+                    </div>
+                )}
+
+                {/* Dynamic Slang Section */}
+                {!isGenerating && !isEditing && !videoUrl && randomSlang && (
+                    <div className="fixed inset-x-0 bottom-0 z-50 flex justify-center pointer-events-none">
+                        <div className="w-full max-w-md mx-auto mb-6 px-4 pointer-events-auto"> 
+                            <div className="bg-white/90 dark:bg-zinc-900/90 backdrop-blur-lg border border-white/30 dark:border-zinc-800/70 rounded-2xl shadow-xl p-5">
+                                <div className="text-center">
+                                    <p className="font-bold text-2xl text-pink-500">{randomSlang.term}</p>
+                                    <p className="text-base mt-2 text-zinc-600 dark:text-zinc-300">{randomSlang.definition}</p>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 )}
 
