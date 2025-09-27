@@ -29,13 +29,16 @@ interface ScriptData {
 interface SceneWithImage extends Scene {
     imageUrl?: string;
     imageLoading?: boolean;
-    audioStartTime?: number; // Add this to track when audio starts for each scene
-    audioEndTime?: number;   // Add this to track when audio ends for each scene
+    audioStartTime?: number;
+    audioEndTime?: number;
+    speaker?: "voice1" | "voice2"; // For conversational reels
+    currentSticker?: string; // Current sticker for this scene
+    templateVideo?: string; // Template video URL if using template
 }
 
 export default function VideoGenerator() {
     const [prompt, setPrompt] = useState("");
-    const [style, setStyle] = useState("brainrot");
+    const [style] = useState("brainrot"); // Fixed to brainrot
     const [isGenerating, setIsGenerating] = useState(false);
     const [generationStep, setGenerationStep] = useState("");
     const [scriptData, setScriptData] = useState<ScriptData | null>(null);
@@ -47,8 +50,15 @@ export default function VideoGenerator() {
     const [currentPreviewScene, setCurrentPreviewScene] = useState(0);
     const [editingSceneIndex, setEditingSceneIndex] = useState<number | null>(null);
     const [darkMode, setDarkMode] = useState(false);
-    const [subtitlesEnabled, setSubtitlesEnabled] = useState(false);
-
+    const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
+    
+    // New state for enhanced features
+    const [useTemplate, setUseTemplate] = useState(false);
+    const [selectedTemplate, setSelectedTemplate] = useState("subway-surfers");
+    const [isConversational, setIsConversational] = useState(false);
+    const [showStickerModal, setShowStickerModal] = useState(false);
+    const [selectedStickers, setSelectedStickers] = useState({ sticker1: "person1", sticker2: "person2" });
+    const [conversationalVoices, setConversationalVoices] = useState({ voice1: "male", voice2: "female" });
 
     useEffect(() => {
         // Check for saved theme preference or default to light mode
@@ -79,6 +89,12 @@ export default function VideoGenerator() {
     const generateScript = async () => {
         if (!prompt.trim()) return;
 
+        // If conversational is selected, show sticker modal first
+        if (isConversational && !showStickerModal) {
+            setShowStickerModal(true);
+            return;
+        }
+
         setIsGenerating(true);
         setVideoUrl(null);
         setScriptData(null);
@@ -91,7 +107,12 @@ export default function VideoGenerator() {
             const scriptResponse = await fetch("/api/generate-script", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ prompt, style }),
+                body: JSON.stringify({ 
+                    prompt, 
+                    style: "brainrot", 
+                    isConversational,
+                    useTemplate 
+                }),
             });
 
             if (!scriptResponse.ok) throw new Error("Failed to generate script");
@@ -100,10 +121,13 @@ export default function VideoGenerator() {
 
             // Initialize scenes with loading state and calculate audio timing
             let currentTime = 0;
-            const initialScenes = script.scenes.map(scene => {
+            const initialScenes = script.scenes.map((scene, index) => {
                 const sceneWithTiming = {
                     ...scene,
-                    imageLoading: true,
+                    imageLoading: !useTemplate,
+                    templateVideo: useTemplate ? getTemplateVideo(selectedTemplate) : undefined,
+                    speaker: isConversational ? (index % 2 === 0 ? "voice1" : "voice2") as "voice1" | "voice2" : undefined,
+                    currentSticker: isConversational ? (index % 2 === 0 ? selectedStickers.sticker1 : selectedStickers.sticker2) : undefined,
                     audioStartTime: currentTime,
                     audioEndTime: currentTime + scene.duration
                 };
@@ -112,27 +136,33 @@ export default function VideoGenerator() {
             });
             setScenesWithImages(initialScenes);
 
-            // Step 2: Fetch images
-            setGenerationStep("Fetching stock images...");
-            const imageQueries = script.scenes.map((s) => s.imageQuery);
-            const imagesResponse = await fetch("/api/fetch-images", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ imageQueries }),
-            });
+            if (!useTemplate) {
+                // Step 2: Fetch images (only if not using template)
+                setGenerationStep("Fetching stock images...");
+                const imageQueries = script.scenes.map((s) => s.imageQuery);
+                const imagesResponse = await fetch("/api/fetch-images", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ imageQueries }),
+                });
 
-            if (!imagesResponse.ok) throw new Error("Failed to fetch images");
-            const { images } = await imagesResponse.json();
+                if (!imagesResponse.ok) throw new Error("Failed to fetch images");
+                const { images } = await imagesResponse.json();
 
-            // Update scenes with actual images while preserving timing
-            const updatedScenes = initialScenes.map((scene, index) => ({
-                ...scene,
-                imageUrl: images[index]?.url,
-                imageLoading: false
-            }));
-            setScenesWithImages(updatedScenes);
+                // Update scenes with actual images while preserving timing
+                const updatedScenes = initialScenes.map((scene, index) => ({
+                    ...scene,
+                    imageUrl: images[index]?.url,
+                    imageLoading: false
+                }));
+                setScenesWithImages(updatedScenes);
+            }
+            
             setIsEditing(true);
-            setGenerationStep("✅ Script and images ready for editing!");
+            setGenerationStep(useTemplate ? 
+                "✅ Script and template ready for editing!" : 
+                "✅ Script and images ready for editing!"
+            );
         } catch (error) {
             console.error("Error generating script:", error);
             setGenerationStep(`Error: ${error}`);
@@ -141,11 +171,31 @@ export default function VideoGenerator() {
         }
     };
 
-    // Add a function to get the duration from an audio Blob
-    // IMPORTANT: You need to define this function inside your VideoGenerator component
-    // or as a helper utility. This is used in 'proceedToVideo' before calling
-    // 'createSynchronizedVideo'.
+    const getTemplateVideo = (template: string): string => {
+        const templates = {
+            "subway-surfers": "/assets/templates/subway-surfers.mp4",
+            "minecraft-parkour": "/assets/templates/minecraft-parkour.mp4",
+            "satisfying-clips": "/assets/templates/satisfying-clips.mp4",
+            "fidget-spinner": "/assets/templates/fidget-spinner.mp4"
+        };
+        return templates[template as keyof typeof templates] || templates["subway-surfers"];
+    };
 
+    const getStickerEmoji = (
+        sticker: "person1" | "person2" | "robot" | "cat" | "alien" | "wizard"
+    ): string => {
+        const stickers = {
+            "person1": "👨",
+            "person2": "👩", 
+            "robot": "🤖",
+            "cat": "🐱",
+            "alien": "👽",
+            "wizard": "🧙"
+        };
+        return stickers[sticker] || "👨";
+    };
+
+    // Add a function to get the duration from an audio Blob
     const getAudioDuration = async (audioBlob: Blob): Promise<number> => {
         return new Promise((resolve) => {
             const audio = new Audio();
@@ -165,7 +215,7 @@ export default function VideoGenerator() {
             const onError = () => {
                 console.error("Failed to load audio metadata for duration calculation, assuming 0s.");
                 cleanup();
-                resolve(0); // Resolve with 0 or a fallback value if metadata fails to load
+                resolve(0);
             };
 
             audio.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
@@ -183,16 +233,25 @@ export default function VideoGenerator() {
             setGenerationStep("Generating voiceover for each scene...");
             const audioFiles: Blob[] = [];
             const audioDurations: number[] = [];
-            const newScenesWithImages = [...scenesWithImages]; // Create a mutable copy
+            const newScenesWithImages = [...scenesWithImages];
 
             for (let i = 0; i < newScenesWithImages.length; i++) {
                 const scene = newScenesWithImages[i];
                 setGenerationStep(`Generating voiceover for scene ${i + 1}/${newScenesWithImages.length}...`);
 
+                // Determine voice type for conversational mode
+                let voiceType = "default";
+                if (isConversational && scene.speaker) {
+                    voiceType = scene.speaker === "voice1" ? conversationalVoices.voice1 : conversationalVoices.voice2;
+                }
+
                 const audioResponse = await fetch("/api/generate-audio", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ text: scene.voiceover }),
+                    body: JSON.stringify({ 
+                        text: scene.voiceover,
+                        voice: voiceType 
+                    }),
                 });
 
                 if (!audioResponse.ok) throw new Error(`Failed to generate audio for scene ${i + 1}`);
@@ -208,7 +267,7 @@ export default function VideoGenerator() {
                 // 3. CRITICAL FIX: Update the scene's duration with the actual audio duration
                 newScenesWithImages[i] = {
                     ...scene,
-                    duration: actualDuration, // The frame generation must use this value!
+                    duration: actualDuration,
                     audioStartTime: i === 0 ? 0 : audioDurations.slice(0, i).reduce((a, b) => a + b, 0),
                     audioEndTime: audioDurations.slice(0, i + 1).reduce((a, b) => a + b, 0),
                 };
@@ -239,7 +298,7 @@ export default function VideoGenerator() {
         }
     };
 
-    const updateScene = (index: number, field: keyof Scene, value: string | number) => {
+    const updateScene = (index: number, field: keyof SceneWithImage, value: string | number) => {
         const updatedScenes = [...scenesWithImages];
         const oldDuration = updatedScenes[index].duration;
         updatedScenes[index] = { ...updatedScenes[index], [field]: value };
@@ -274,12 +333,9 @@ export default function VideoGenerator() {
     };
 
     const regenerateImage = async (index: number) => {
-        // 1. Create a shallow copy of the entire scenes array.
         const updatedScenes = [...scenesWithImages];
-
-        // 2. Create a new object for the scene being updated, setting loading to true.
         updatedScenes[index] = { ...updatedScenes[index], imageLoading: true };
-        setScenesWithImages(updatedScenes); // Force update to show loading state
+        setScenesWithImages(updatedScenes);
 
         try {
             const imagesResponse = await fetch("/api/fetch-images", {
@@ -291,23 +347,17 @@ export default function VideoGenerator() {
             if (!imagesResponse.ok) throw new Error("Failed to fetch new image");
             const { images } = await imagesResponse.json();
 
-            // 3. Create a fresh copy of the array for the final update.
             const finalUpdatedScenes = [...scenesWithImages];
-
-            // 4. Create a new object for the scene, applying the new image URL and setting loading to false.
             finalUpdatedScenes[index] = {
                 ...finalUpdatedScenes[index],
                 imageUrl: images[0]?.url,
                 imageLoading: false
             };
 
-            // 5. Set state with the completely new array reference.
             setScenesWithImages(finalUpdatedScenes);
 
         } catch (error) {
             console.error("Error regenerating image:", error);
-
-            // Ensure loading state is reset even on error
             const errorUpdatedScenes = [...scenesWithImages];
             errorUpdatedScenes[index] = { ...errorUpdatedScenes[index], imageLoading: false };
             setScenesWithImages(errorUpdatedScenes);
@@ -334,8 +384,6 @@ export default function VideoGenerator() {
         return lines;
     };
 
-    // New synchronized video creation function
-    // You need to update the signature to accept audioDurations
     const createSynchronizedVideo = async (script: ScriptData, images: any[], audioFiles: Blob[], audioDurations: number[]) => {
         if (!ffmpeg || !ffmpeg.loaded) {
             throw new Error("FFmpeg is not loaded. Please ensure it has loaded before calling this function.");
@@ -349,8 +397,6 @@ export default function VideoGenerator() {
         const fps = 30;
         let frameCount = 0;
 
-        // NOTE: 'subtitlesEnabled' must be available in this scope (from the component state)
-
         // Write individual audio files to FFmpeg
         for (let i = 0; i < audioFiles.length; i++) {
             await ffmpeg.writeFile(`audio_${i}.mp3`, await fetchFile(audioFiles[i]));
@@ -359,19 +405,27 @@ export default function VideoGenerator() {
         // Create frames for each scene
         for (let i = 0; i < script.scenes.length; i++) {
             const scene = script.scenes[i];
+            const sceneWithImage = scenesWithImages[i];
             const actualSceneDuration = audioDurations[i] || scene.duration;
 
-            const img = new Image();
-            img.crossOrigin = "anonymous";
+            // Handle background (template vs image)
+            let backgroundElement = null;
+            if (useTemplate) {
+                backgroundElement = null;
+            } else {
+                const img = new Image();
+                img.crossOrigin = "anonymous";
 
-            await new Promise((resolve) => {
-                img.onload = () => resolve(undefined);
-                img.onerror = () => {
-                    console.error(`Failed to load image for scene ${i}`);
-                    resolve(undefined);
-                };
-                img.src = images[i]?.url || '';
-            });
+                await new Promise((resolve) => {
+                    img.onload = () => resolve(undefined);
+                    img.onerror = () => {
+                        console.error(`Failed to load image for scene ${i}`);
+                        resolve(undefined);
+                    };
+                    img.src = images[i]?.url || '';
+                });
+                backgroundElement = img;
+            }
 
             const framesForScene = Math.floor(actualSceneDuration * fps);
 
@@ -384,15 +438,34 @@ export default function VideoGenerator() {
             for (let f = 0; f < framesForScene; f++) {
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-                // 1. Draw image (Image Drawing Logic)
-                if (img.complete && img.naturalHeight !== 0) {
-                    const scale = Math.max(canvas.width / img.width, canvas.height / img.height);
+                // 1. Draw background
+                if (useTemplate) {
+                    // Draw template background (gradient placeholder)
+                    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+                    gradient.addColorStop(0, '#3B82F6');
+                    gradient.addColorStop(1, '#8B5CF6');
+                    ctx.fillStyle = gradient;
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                    // Add template title
+                    ctx.fillStyle = "white";
+                    ctx.font = "bold 48px Arial";
+                    ctx.textAlign = "center";
+                    ctx.fillText(
+                        selectedTemplate.replace('-', ' ').toUpperCase(),
+                        canvas.width / 2,
+                        canvas.height / 2 - 100
+                    );
+                    ctx.font = "24px Arial";
+                    ctx.fillText("Template Background", canvas.width / 2, canvas.height / 2 - 50);
+                } else if (backgroundElement && backgroundElement.complete && backgroundElement.naturalHeight !== 0) {
+                    const scale = Math.max(canvas.width / backgroundElement.width, canvas.height / backgroundElement.height);
                     ctx.drawImage(
-                        img,
-                        (canvas.width - img.width * scale) / 2,
-                        (canvas.height - img.height * scale) / 2,
-                        img.width * scale,
-                        img.height * scale
+                        backgroundElement,
+                        (canvas.width - backgroundElement.width * scale) / 2,
+                        (canvas.height - backgroundElement.height * scale) / 2,
+                        backgroundElement.width * scale,
+                        backgroundElement.height * scale
                     );
                 } else {
                     ctx.fillStyle = "#1f1f1f";
@@ -400,12 +473,32 @@ export default function VideoGenerator() {
                     ctx.fillStyle = "white";
                     ctx.font = "bold 48px Arial";
                     ctx.textAlign = "center";
-                    ctx.fillText("Image Loading...", canvas.width / 2, canvas.height / 2);
+                    ctx.fillText("Loading...", canvas.width / 2, canvas.height / 2);
+                }
+
+                // 2. Draw conversational stickers if enabled
+                if (isConversational && sceneWithImage?.currentSticker) {
+                    const stickerEmoji = getStickerEmoji(sceneWithImage.currentSticker as "person1" | "person2" | "robot" | "cat" | "alien" | "wizard");
+                    const stickerSize = 120;
+                    const stickerX = canvas.width / 2;
+                    const stickerY = canvas.height - 300;
+
+                    // Draw sticker background
+                    ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+                    ctx.beginPath();
+                    ctx.arc(stickerX, stickerY, stickerSize / 2, 0, 2 * Math.PI);
+                    ctx.fill();
+
+                    // Draw sticker emoji
+                    ctx.font = `${stickerSize - 20}px Arial`;
+                    ctx.textAlign = "center";
+                    ctx.textBaseline = "middle";
+                    ctx.fillText(stickerEmoji, stickerX, stickerY);
                 }
 
                 // --- DRAWING AREA DEFINITIONS ---
-                const subtitleY = canvas.height - 100; // Very bottom for VOICE-OVER (Subtitles)
-                const captionY = canvas.height - 250; // Higher up for CAPTION (Static Text)
+                const subtitleY = canvas.height - 100;
+                const captionY = canvas.height - (isConversational ? 180 : 250);
                 const lineSpacing = 80;
                 const textFont = "bold 64px Arial";
                 const textFill = "white";
@@ -413,33 +506,29 @@ export default function VideoGenerator() {
                 const strokeWidth = 10;
                 ctx.font = textFont;
                 ctx.textAlign = "center";
-                // --------------------------------
+                ctx.textBaseline = "alphabetic";
 
-                // 2. DRAW STATIC CAPTION (Dialogue Context/Scene Text)
+                // 3. DRAW STATIC CAPTION
                 if (scene.caption) {
                     const captionLines = getWrappedLines(ctx, scene.caption, canvas.width - 40, textFont);
 
-                    // Draw background area for caption
                     ctx.fillStyle = "rgba(0,0,0,0.6)";
                     ctx.fillRect(0, captionY - lineSpacing, canvas.width, captionLines.length * lineSpacing + 40);
 
                     captionLines.forEach((line, index) => {
                         const textY = captionY + (index * lineSpacing);
 
-                        // Draw outline/shadow
                         ctx.strokeStyle = textStroke;
                         ctx.lineWidth = strokeWidth;
                         ctx.lineJoin = 'round';
                         ctx.strokeText(line, canvas.width / 2, textY);
 
-                        // Draw main text
                         ctx.fillStyle = textFill;
                         ctx.fillText(line, canvas.width / 2, textY);
                     });
                 }
 
-
-                // 3. DRAW ANIMATED DIALOGUE SUBTITLE (Voiceover)
+                // 4. DRAW ANIMATED DIALOGUE SUBTITLE
                 if (subtitlesEnabled && voiceoverText && totalWords > 0) {
                     const currentTimeInScene = f / fps;
                     const wordsToShow = Math.min(totalWords, Math.ceil(currentTimeInScene / wordDuration));
@@ -447,22 +536,14 @@ export default function VideoGenerator() {
 
                     const subtitleLines = getWrappedLines(ctx, currentSubtitleText, canvas.width - 40, textFont);
 
-                    // Draw background area for animated subtitle (optional, but good for visibility)
-                    // ctx.fillStyle = "rgba(0,0,0,0.7)";
-                    // ctx.fillRect(0, subtitleY - lineSpacing, canvas.width, subtitleLines.length * lineSpacing + 40);
-
-
                     subtitleLines.forEach((line, index) => {
-                        // Position the text relative to the very bottom Y coordinate
                         const textY = subtitleY + (index * lineSpacing) - (subtitleLines.length * lineSpacing);
 
-                        // Draw outline/shadow
                         ctx.strokeStyle = textStroke;
                         ctx.lineWidth = strokeWidth;
                         ctx.lineJoin = 'round';
                         ctx.strokeText(line, canvas.width / 2, textY);
 
-                        // Draw main text
                         ctx.fillStyle = textFill;
                         ctx.fillText(line, canvas.width / 2, textY);
                     });
@@ -478,7 +559,7 @@ export default function VideoGenerator() {
             }
         }
 
-        // FFmpeg Audio Concatenation Logic (remains the same)
+        // FFmpeg Audio Concatenation Logic
         let audioFilterComplex = "";
         let audioInputs = "";
 
@@ -492,7 +573,7 @@ export default function VideoGenerator() {
         }
         audioFilterComplex = `${concatInputs}concat=n=${audioFiles.length}:v=0:a=1[audio]`;
 
-        // Execute FFmpeg command (remains the same)
+        // Execute FFmpeg command
         const ffmpegCommand = [
             "-r", String(fps),
             "-i", "frame_%05d.jpg",
@@ -591,7 +672,7 @@ export default function VideoGenerator() {
                         </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-6">
-                        <div className="grid sm:grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-4">
                             <Input
                                 placeholder="e.g., A cat discovering a magic yarn ball"
                                 value={prompt}
@@ -599,17 +680,60 @@ export default function VideoGenerator() {
                                 className="h-12 text-base dark:bg-zinc-800"
                                 disabled={isEditing}
                             />
-                            <Select value={style} onValueChange={setStyle} disabled={isEditing}>
-                                <SelectTrigger className="h-12 text-base dark:bg-zinc-800">
-                                    <SelectValue placeholder="Select a style" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="brainrot">Brainrot</SelectItem>
-                                    <SelectItem value="aesthetic">Aesthetic</SelectItem>
-                                    <SelectItem value="anime">Anime</SelectItem>
-                                    <SelectItem value="cinematic">Cinematic</SelectItem>
-                                </SelectContent>
-                            </Select>
+                            
+                            {/* Template Selection */}
+                            <div className="space-y-3">
+                                <div className="flex items-center space-x-2">
+                                    <input
+                                        type="checkbox"
+                                        id="useTemplate"
+                                        checked={useTemplate}
+                                        onChange={(e) => setUseTemplate(e.target.checked)}
+                                        disabled={isEditing}
+                                        className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
+                                    />
+                                    <label htmlFor="useTemplate" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                                        Use background video template
+                                    </label>
+                                </div>
+                                
+                                {useTemplate && (
+                                    <Select value={selectedTemplate} onValueChange={setSelectedTemplate} disabled={isEditing}>
+                                        <SelectTrigger className="h-12 text-base dark:bg-zinc-800">
+                                            <SelectValue placeholder="Select a template" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="subway-surfers">Subway Surfers</SelectItem>
+                                            <SelectItem value="minecraft-parkour">Minecraft Parkour</SelectItem>
+                                            <SelectItem value="satisfying-clips">Satisfying Clips</SelectItem>
+                                            <SelectItem value="fidget-spinner">Fidget Spinner</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                )}
+                            </div>
+                            
+                            {/* Conversational Reel Option */}
+                            <div className="space-y-3">
+                                <div className="flex items-center space-x-2">
+                                    <input
+                                        type="checkbox"
+                                        id="isConversational"
+                                        checked={isConversational}
+                                        onChange={(e) => setIsConversational(e.target.checked)}
+                                        disabled={isEditing}
+                                        className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
+                                    />
+                                    <label htmlFor="isConversational" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                                        Make it conversational (dialogue between two people)
+                                    </label>
+                                </div>
+                                
+                                {isConversational && (
+                                    <div className="text-xs text-zinc-500 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-800 p-3 rounded-lg">
+                                        This will create a dialogue between two people with animated stickers and different voices for each speaker.
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         {!isEditing ? (
@@ -653,6 +777,114 @@ export default function VideoGenerator() {
                         {generationStep && <p className="text-center text-sm text-zinc-500 dark:text-zinc-400">{generationStep}</p>}
                     </CardContent>
                 </Card>
+
+                {/* Sticker Selection Modal */}
+                {showStickerModal && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                        <Card className="w-full max-w-md mx-4">
+                            <CardHeader>
+                                <CardTitle className="text-xl">Choose Conversation Characters</CardTitle>
+                                <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                                    Select two characters that will appear as stickers during the conversation
+                                </p>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                <div>
+                                    <label className="text-sm font-medium mb-2 block">First Speaker</label>
+                                    <Select value={selectedStickers.sticker1} onValueChange={(value) => 
+                                        setSelectedStickers(prev => ({ ...prev, sticker1: value }))
+                                    }>
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="person1">👨 Person 1</SelectItem>
+                                            <SelectItem value="person2">👩 Person 2</SelectItem>
+                                            <SelectItem value="robot">🤖 Robot</SelectItem>
+                                            <SelectItem value="cat">🐱 Cat</SelectItem>
+                                            <SelectItem value="alien">👽 Alien</SelectItem>
+                                            <SelectItem value="wizard">🧙 Wizard</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                
+                                <div>
+                                    <label className="text-sm font-medium mb-2 block">Second Speaker</label>
+                                    <Select value={selectedStickers.sticker2} onValueChange={(value) => 
+                                        setSelectedStickers(prev => ({ ...prev, sticker2: value }))
+                                    }>
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="person1">👨 Person 1</SelectItem>
+                                            <SelectItem value="person2">👩 Person 2</SelectItem>
+                                            <SelectItem value="robot">🤖 Robot</SelectItem>
+                                            <SelectItem value="cat">🐱 Cat</SelectItem>
+                                            <SelectItem value="alien">👽 Alien</SelectItem>
+                                            <SelectItem value="wizard">🧙 Wizard</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                
+                                <div className="space-y-3">
+                                    <div>
+                                        <label className="text-sm font-medium mb-2 block">First Speaker Voice</label>
+                                        <Select value={conversationalVoices.voice1} onValueChange={(value) => 
+                                            setConversationalVoices(prev => ({ ...prev, voice1: value }))
+                                        }>
+                                            <SelectTrigger>
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="male">Male Voice</SelectItem>
+                                                <SelectItem value="female">Female Voice</SelectItem>
+                                                <SelectItem value="young-male">Young Male</SelectItem>
+                                                <SelectItem value="young-female">Young Female</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="text-sm font-medium mb-2 block">Second Speaker Voice</label>
+                                        <Select value={conversationalVoices.voice2} onValueChange={(value) => 
+                                            setConversationalVoices(prev => ({ ...prev, voice2: value }))
+                                        }>
+                                            <SelectTrigger>
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="male">Male Voice</SelectItem>
+                                                <SelectItem value="female">Female Voice</SelectItem>
+                                                <SelectItem value="young-male">Young Male</SelectItem>
+                                                <SelectItem value="young-female">Young Female</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex space-x-2 pt-4">
+                                    <Button 
+                                        variant="outline" 
+                                        onClick={() => setShowStickerModal(false)}
+                                        className="flex-1"
+                                    >
+                                        Cancel
+                                    </Button>
+                                    <Button 
+                                        onClick={() => {
+                                            setShowStickerModal(false);
+                                            generateScript();
+                                        }}
+                                        className="flex-1 bg-purple-500 hover:bg-purple-600"
+                                    >
+                                        Continue
+                                    </Button>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    </div>
+                )}
 
                 {/* Editing Interface */}
                 {isEditing && scriptData && scenesWithImages.length > 0 && (
@@ -704,11 +936,59 @@ export default function VideoGenerator() {
                                                 </div>
                                             </CardHeader>
                                             <CardContent className="space-y-3">
+                                                {/* Speaker Selection for Conversational Mode */}
+                                                {isConversational && (
+                                                    <div className="grid grid-cols-2 gap-2 mb-3">
+                                                        <div>
+                                                            <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                                                                Speaker:
+                                                            </label>
+                                                            <Select 
+                                                                value={scene.speaker || "voice1"} 
+                                                                onValueChange={(value: "voice1" | "voice2") => 
+                                                                    updateScene(index, 'speaker', value)
+                                                                }
+                                                            >
+                                                                <SelectTrigger className="h-8 text-xs">
+                                                                    <SelectValue />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    <SelectItem value="voice1">Speaker 1</SelectItem>
+                                                                    <SelectItem value="voice2">Speaker 2</SelectItem>
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </div>
+                                                        <div>
+                                                            <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                                                                Sticker:
+                                                            </label>
+                                                            <Select 
+                                                                value={scene.currentSticker || selectedStickers.sticker1} 
+                                                                onValueChange={(value) => 
+                                                                    updateScene(index, 'currentSticker', value)
+                                                                }
+                                                            >
+                                                                <SelectTrigger className="h-8 text-xs">
+                                                                    <SelectValue />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    <SelectItem value="person1">👨 Person 1</SelectItem>
+                                                                    <SelectItem value="person2">👩 Person 2</SelectItem>
+                                                                    <SelectItem value="robot">🤖 Robot</SelectItem>
+                                                                    <SelectItem value="cat">🐱 Cat</SelectItem>
+                                                                    <SelectItem value="alien">👽 Alien</SelectItem>
+                                                                    <SelectItem value="wizard">🧙 Wizard</SelectItem>
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </div>
+                                                    </div>
+                                                )}
+
                                                 {/* Voiceover */}
                                                 <div>
                                                     <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300 flex items-center">
                                                         <MessageSquare className="w-3 h-3 mr-1" />
-                                                        Voiceover:
+                                                        {isConversational ? "Dialogue:" : "Voiceover:"}
                                                     </label>
                                                     <Textarea
                                                         value={scene.voiceover}
@@ -729,33 +1009,44 @@ export default function VideoGenerator() {
                                                     />
                                                 </div>
 
-                                                {/* Image Query */}
-                                                <div>
-                                                    <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300 flex items-center">
-                                                        <Search className="w-3 h-3 mr-1" />
-                                                        Image Search:
-                                                    </label>
-                                                    <div className="flex space-x-2 mt-1">
-                                                        <Input
-                                                            value={scene.imageQuery}
-                                                            onChange={(e) => updateScene(index, 'imageQuery', e.target.value)}
-                                                            className="text-sm"
-                                                        />
-                                                        <Button
-                                                            variant="outline"
-                                                            size="sm"
-                                                            onClick={() => regenerateImage(index)}
-                                                            disabled={scene.imageLoading}
-                                                            className="whitespace-nowrap"
-                                                        >
-                                                            {scene.imageLoading ? (
-                                                                <Loader2 className="w-3 h-3 animate-spin" />
-                                                            ) : (
-                                                                "Re-gen"
-                                                            )}
-                                                        </Button>
+                                                {/* Image Query - Only show if not using template */}
+                                                {!useTemplate && (
+                                                    <div>
+                                                        <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300 flex items-center">
+                                                            <Search className="w-3 h-3 mr-1" />
+                                                            Image Search:
+                                                        </label>
+                                                        <div className="flex space-x-2 mt-1">
+                                                            <Input
+                                                                value={scene.imageQuery}
+                                                                onChange={(e) => updateScene(index, 'imageQuery', e.target.value)}
+                                                                className="text-sm"
+                                                            />
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={() => regenerateImage(index)}
+                                                                disabled={scene.imageLoading}
+                                                                className="whitespace-nowrap"
+                                                            >
+                                                                {scene.imageLoading ? (
+                                                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                                                ) : (
+                                                                    "Re-gen"
+                                                                )}
+                                                            </Button>
+                                                        </div>
                                                     </div>
-                                                </div>
+                                                )}
+
+                                                {/* Template info - Show if using template */}
+                                                {useTemplate && (
+                                                    <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg">
+                                                        <p className="text-xs text-blue-700 dark:text-blue-300">
+                                                            Using template: <strong>{selectedTemplate.replace('-', ' ')}</strong>
+                                                        </p>
+                                                    </div>
+                                                )}
 
                                                 {/* Visual Description */}
                                                 <div>
@@ -843,39 +1134,58 @@ export default function VideoGenerator() {
 
                                                 {/* Video Content */}
                                                 <div className="w-full h-full relative pt-8">
-                                                    {scenesWithImages[currentPreviewScene]?.imageUrl && (
-                                                        <>
+                                                    {/* Background - Template or Image */}
+                                                    {useTemplate ? (
+                                                        <div className="w-full h-full bg-gradient-to-b from-blue-500 to-purple-600 flex items-center justify-center">
+                                                            <div className="text-white text-center">
+                                                                <div className="text-lg font-bold mb-2">
+                                                                    {selectedTemplate.replace('-', ' ').toUpperCase()}
+                                                                </div>
+                                                                <div className="text-sm opacity-75">Template Preview</div>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        scenesWithImages[currentPreviewScene]?.imageUrl && (
                                                             <img
                                                                 src={scenesWithImages[currentPreviewScene].imageUrl}
                                                                 alt="Preview"
                                                                 className="w-full h-full object-cover"
                                                             />
+                                                        )
+                                                    )}
 
-                                                            {/* Instagram Reel Style Icons */}
-                                                            <div className="absolute right-3 bottom-20 flex flex-col items-center space-y-5 text-white">
-                                                                <button>
-                                                                    <Heart className="w-7 h-7" />
-                                                                </button>
-                                                                <button>
-                                                                    <MessageCircle className="w-7 h-7" />
-                                                                </button>
-                                                                <button>
-                                                                    <Send className="w-7 h-7" />
-                                                                </button>
-                                                                <button>
-                                                                    <Bookmark className="w-7 h-7" />
-                                                                </button>
+                                                    {/* Conversational Stickers */}
+                                                    {isConversational && scenesWithImages[currentPreviewScene] && (
+                                                        <div className="absolute bottom-32 left-4 right-4 flex justify-center">
+                                                            <div className="bg-white bg-opacity-90 rounded-full p-3 text-2xl shadow-lg">
+                                                                {getStickerEmoji((scenesWithImages[currentPreviewScene].currentSticker || 'person1') as "person1" | "person2" | "robot" | "cat" | "alien" | "wizard")}
                                                             </div>
+                                                        </div>
+                                                    )}
 
-                                                            {/* Caption Overlay */}
-                                                            {scenesWithImages[currentPreviewScene].caption && (
-                                                                <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 p-3">
-                                                                    <p className="text-white text-sm text-center font-medium leading-tight">
-                                                                        {scenesWithImages[currentPreviewScene].caption}
-                                                                    </p>
-                                                                </div>
-                                                            )}
-                                                        </>
+                                                    {/* Instagram Reel Style Icons */}
+                                                    <div className="absolute right-3 bottom-20 flex flex-col items-center space-y-5 text-white">
+                                                        <button>
+                                                            <Heart className="w-7 h-7" />
+                                                        </button>
+                                                        <button>
+                                                            <MessageCircle className="w-7 h-7" />
+                                                        </button>
+                                                        <button>
+                                                            <Send className="w-7 h-7" />
+                                                        </button>
+                                                        <button>
+                                                            <Bookmark className="w-7 h-7" />
+                                                        </button>
+                                                    </div>
+
+                                                    {/* Caption Overlay */}
+                                                    {scenesWithImages[currentPreviewScene]?.caption && (
+                                                        <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 p-3">
+                                                            <p className="text-white text-sm text-center font-medium leading-tight">
+                                                                {scenesWithImages[currentPreviewScene].caption}
+                                                            </p>
+                                                        </div>
                                                     )}
                                                 </div>
                                             </div>

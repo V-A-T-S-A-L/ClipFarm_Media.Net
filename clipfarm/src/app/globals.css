@@ -79,7 +79,7 @@
 }
 
 .dark {
-  --background: oklch(0.141 0.005 285.823);
+  --background: oklch(0% 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.21 0.006 285.885);
   --card-foreground: oklch(0.985 0 0);
@@ -114,6 +114,25 @@
 
 button {
   cursor: pointer;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: palevioletred;
+  border-radius: 15px;
+}
+
+::selection {
+    color: white;
+    background-color: rgb(128, 0, 128);
 }
 
 @layer base {
